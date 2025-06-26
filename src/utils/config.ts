@@ -31,9 +31,9 @@ export interface AppConfig {
 // Default configuration
 export const DEFAULT_CONFIG: AppConfig = {
   ai: {
-    model: "qwen2.5:0.5b",
+    model: "qwen3:0.6b",
     temperature: 0.7,
-    maxTokens: 1000,
+    maxTokens: 2000, // Increased from 1000 to 2000
     baseUrl: "http://localhost:11434",
   },
   voice: {
@@ -158,4 +158,14 @@ export const getBestVoiceForLanguage = (
   }
 
   return voice || null;
+};
+
+export const validateAIConfig = (config: AIConfig): AIConfig => {
+  return {
+    ...config,
+    // Pastikan maxTokens minimal 1500 untuk response yang lengkap
+    maxTokens: Math.max(config.maxTokens, 1500),
+    // Pastikan temperature tidak terlalu tinggi yang bisa bikin response tidak fokus
+    temperature: Math.min(Math.max(config.temperature, 0.1), 1.5),
+  };
 };

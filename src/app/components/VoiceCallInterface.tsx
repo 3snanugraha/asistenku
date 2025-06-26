@@ -3,7 +3,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { AppConfig, getBestVoiceForLanguage } from "@/utils/config";
 import { getAPIClient, ChatMessage } from "@/utils/api";
-import { formatForVoice, isVoiceSuitable } from "@/utils/voiceformatter";
+import {
+  formatForTTS,
+  formatForConversation,
+  formatForDisplay,
+} from "@/utils/voiceformatter";
 
 interface VoiceCallInterfaceProps {
   config: AppConfig;
@@ -217,31 +221,19 @@ export default function VoiceCallInterface({
           return;
         }
 
-        // Format message for voice synthesis
-        const formattedMessage = formatForVoice(message);
-
-        // Check if formatted message is suitable for voice
-        if (!isVoiceSuitable(formattedMessage)) {
-          console.warn("Message not suitable for voice synthesis:", message);
-          // Fallback to simple response
-          const fallbackMessage =
-            "Maaf, saya tidak dapat memproses respons tersebut dengan baik.";
-          const finalMessage = formatForVoice(fallbackMessage);
-
-          if (!finalMessage.trim()) {
-            reject(new Error("Tidak ada konten yang dapat diucapkan"));
-            return;
-          }
-        }
-
-        const textToSpeak =
-          formattedMessage.trim() ||
-          "Maaf, tidak ada respons yang dapat saya berikan.";
-
         // Cancel any ongoing speech
         speechSynthesis.cancel();
 
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        // Format message untuk TTS (hapus <think> tags dll)
+        const formattedMessage = formatForTTS(message);
+
+        // Jika setelah formatting tidak ada text, skip
+        if (!formattedMessage.trim()) {
+          resolve();
+          return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(formattedMessage);
 
         // Configure voice
         const voice = getBestVoiceForLanguage(config.voice.language);
@@ -257,8 +249,8 @@ export default function VoiceCallInterface({
         utterance.onstart = () => {
           setIsSpeaking(true);
           setCallStatus("speaking");
-          // Store original message for display, not the formatted one
-          setLastAIResponse(message);
+          // Simpan versi yang diformat untuk display
+          setLastAIResponse(formatForDisplay(message));
         };
 
         utterance.onend = () => {
@@ -270,7 +262,7 @@ export default function VoiceCallInterface({
             if (
               recognitionRef.current &&
               !isMuted &&
-              (currentStatus === "connected" || currentStatus === "speaking")
+              (currentStatus === "connected" || currentStatus === "speaking") // Fix: Only check valid statuses
             ) {
               setTimeout(() => {
                 try {
@@ -308,7 +300,6 @@ export default function VoiceCallInterface({
     async (transcript: string) => {
       if (!transcript || transcript.length < 2) return;
 
-      // Add user message to history
       const userMessage: ChatMessage = {
         role: "user",
         content: transcript,
@@ -319,7 +310,6 @@ export default function VoiceCallInterface({
       setCallStatus("thinking");
 
       try {
-        // Send to AI
         const apiClient = getAPIClient(config.ai);
         const response = await apiClient.sendMessage(
           transcript,
@@ -327,53 +317,26 @@ export default function VoiceCallInterface({
         );
 
         if (response.success && response.message) {
-          // Add AI response to history (store original response)
+          // Simpan versi yang diformat untuk conversation
           const aiMessage: ChatMessage = {
             role: "assistant",
-            content: response.message,
+            content: formatForConversation(response.message),
             timestamp: new Date(),
           };
 
           setConversationHistory((prev) => [...prev, aiMessage]);
 
-          // Check if response is suitable for voice
-          if (!isVoiceSuitable(response.message)) {
-            console.warn(
-              "AI response not suitable for voice:",
-              response.message
-            );
-            // Create a fallback response
-            const fallbackResponse =
-              "Saya telah memproses permintaan Anda. Apakah ada yang bisa saya bantu lagi?";
-            if (speakAIMessageRef.current) {
-              await speakAIMessageRef.current(fallbackResponse);
-            }
-          } else {
-            // Speak AI response (will be formatted inside speakAIMessage)
-            if (speakAIMessageRef.current) {
-              await speakAIMessageRef.current(response.message);
-            }
+          // Speak dengan formatted message
+          if (speakAIMessageRef.current) {
+            await speakAIMessageRef.current(response.message);
           }
         } else {
           throw new Error(response.error || "AI tidak merespons");
         }
       } catch (error) {
         console.error("Error getting AI response:", error);
-        const errorMsg =
-          "Maaf, terjadi kesalahan saat berkomunikasi dengan AI. Silakan coba lagi.";
-        setErrorMessage(errorMsg);
-
-        // Speak error message
-        if (speakAIMessageRef.current) {
-          try {
-            await speakAIMessageRef.current(errorMsg);
-          } catch (voiceError) {
-            console.error("Failed to speak error message:", voiceError);
-            setCallStatus("error");
-          }
-        } else {
-          setCallStatus("error");
-        }
+        setErrorMessage("Terjadi kesalahan saat berkomunikasi dengan AI");
+        setCallStatus("error");
       }
     },
     [config.ai, conversationHistory]
@@ -685,17 +648,13 @@ export default function VoiceCallInterface({
             </div>
           )}
 
-          {/* Last AI Response - Show formatted version for display */}
+          {/* Last AI Response */}
           {lastAIResponse && !isSpeaking && (
             <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
               <p className="text-sm text-purple-600 dark:text-purple-400 mb-1">
                 {config.aiName} berkata:
               </p>
-              <p className="font-medium">
-                {/* Display a clean version of the response */}
-                {formatForVoice(lastAIResponse) ||
-                  "Saya sedang memproses respons..."}
-              </p>
+              <p className="font-medium">{lastAIResponse}</p>
             </div>
           )}
 
@@ -768,7 +727,7 @@ export default function VoiceCallInterface({
         </div>
       </div>
 
-      {/* Conversation History - Show original responses */}
+      {/* Conversation History (Minimized) */}
       {conversationHistory.length > 0 && (
         <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700">
           <div className="max-w-4xl mx-auto p-4">
@@ -792,12 +751,7 @@ export default function VoiceCallInterface({
                   <div className="font-medium mb-1">
                     {message.role === "user" ? config.userName : config.aiName}:
                   </div>
-                  <div>
-                    {/* Show formatted version for better readability */}
-                    {message.role === "assistant"
-                      ? formatForVoice(message.content)
-                      : message.content}
-                  </div>
+                  <div>{message.content}</div>
                 </div>
               ))}
             </div>

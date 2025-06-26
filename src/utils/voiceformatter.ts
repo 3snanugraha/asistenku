@@ -1,353 +1,205 @@
 /**
- * Voice Formatter Utility - Enhanced with debugging
- * Formats AI responses to be more suitable for text-to-speech synthesis
+ * Voice Formatter untuk membersihkan response AI sebelum TTS
+ * Menghapus tag <think>, markdown, dan formatting lainnya
  */
 
-export interface VoiceFormatterConfig {
-  removeThinkTags: boolean;
-  removeMarkdown: boolean;
-  removeEmoticons: boolean;
-  normalizeNumbers: boolean;
-  normalizePunctuation: boolean;
+export interface VoiceFormatterOptions {
+  removeThinkTags?: boolean;
+  removeMarkdown?: boolean;
+  removeEmojis?: boolean;
+  removeAIPrefix?: boolean;
+  normalizeWhitespace?: boolean;
   maxLength?: number;
-  debug?: boolean; // Add debug flag
 }
 
-export const DEFAULT_VOICE_CONFIG: VoiceFormatterConfig = {
+const DEFAULT_OPTIONS: VoiceFormatterOptions = {
   removeThinkTags: true,
   removeMarkdown: true,
-  removeEmoticons: true,
-  normalizeNumbers: true,
-  normalizePunctuation: true,
-  maxLength: 500,
-  debug: false, // Set to true for debugging
+  removeEmojis: true,
+  removeAIPrefix: true,
+  normalizeWhitespace: true,
+  maxLength: 500, // Batas maksimal karakter untuk TTS
 };
 
-export class VoiceFormatter {
-  private config: VoiceFormatterConfig;
+/**
+ * Membersihkan response AI untuk TTS
+ */
+export const formatForTTS = (
+  text: string,
+  options: VoiceFormatterOptions = {}
+): string => {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  let formatted = text;
 
-  constructor(config: VoiceFormatterConfig = DEFAULT_VOICE_CONFIG) {
-    this.config = config;
+  // 1. Hapus tag <think>...</think> (case insensitive, multiline)
+  if (opts.removeThinkTags) {
+    formatted = formatted.replace(/<think>[\s\S]*?<\/think>/gi, "");
   }
 
-  /**
-   * Main method to format AI response for voice synthesis
-   */
-  formatForVoice(text: string): string {
-    if (this.config.debug) {
-      console.log("🎙️ [VoiceFormatter] Original text:", text);
-    }
-
-    let formattedText = text;
-
-    // Remove think tags and content - MOST IMPORTANT STEP
-    if (this.config.removeThinkTags) {
-      const beforeThink = formattedText;
-      formattedText = this.removeThinkTags(formattedText);
-      if (this.config.debug) {
-        console.log(
-          "🎙️ [VoiceFormatter] After removing think tags:",
-          formattedText
-        );
-        console.log(
-          "🎙️ [VoiceFormatter] Think tags removed?",
-          beforeThink !== formattedText
-        );
-      }
-    }
-
-    // Remove markdown formatting
-    if (this.config.removeMarkdown) {
-      formattedText = this.removeMarkdown(formattedText);
-    }
-
-    // Remove emoticons and emojis
-    if (this.config.removeEmoticons) {
-      formattedText = this.removeEmoticons(formattedText);
-    }
-
-    // Normalize numbers for better pronunciation
-    if (this.config.normalizeNumbers) {
-      formattedText = this.normalizeNumbers(formattedText);
-    }
-
-    // Normalize punctuation for better speech flow
-    if (this.config.normalizePunctuation) {
-      formattedText = this.normalizePunctuation(formattedText);
-    }
-
-    // Clean up extra whitespace and special characters
-    formattedText = this.cleanupText(formattedText);
-
-    // Limit length if specified
-    if (this.config.maxLength) {
-      formattedText = this.limitLength(formattedText, this.config.maxLength);
-    }
-
-    const finalResult = formattedText.trim();
-
-    if (this.config.debug) {
-      console.log("🎙️ [VoiceFormatter] Final result:", finalResult);
-    }
-
-    return finalResult;
+  // 2. Hapus prefix AI name (Asistenqu:, AI:, Assistant:, dll)
+  if (opts.removeAIPrefix) {
+    formatted = formatted.replace(/^(Asistenqu|AI|Assistant|Bot):\s*/gi, "");
   }
 
-  /**
-   * Remove <think> tags and their content - Enhanced version
-   */
-  private removeThinkTags(text: string): string {
-    if (!text) return text;
+  // 3. Hapus markdown formatting
+  if (opts.removeMarkdown) {
+    // Bold (**text** atau __text__)
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, "$1");
+    formatted = formatted.replace(/__(.*?)__/g, "$1");
 
-    let cleaned = text;
+    // Italic (*text* atau _text_)
+    formatted = formatted.replace(/\*(.*?)\*/g, "$1");
+    formatted = formatted.replace(/_(.*?)_/g, "$1");
 
-    // Multiple patterns to catch different think tag formats
-    const thinkPatterns = [
-      // Standard think tags
-      /<think>[\s\S]*?<\/think>/gi,
-      // Think tags with variations
-      /<think[^>]*>[\s\S]*?<\/think>/gi,
-      // Think blocks without proper closing
-      /<think>[\s\S]*$/gi,
-      // Think text patterns (common AI response patterns)
-      /think[\s]*:[\s\S]*?(?=\n\n|$)/gi,
-      // Lines starting with "think" (common in AI responses)
-      /^think[\s\S]*?(?=\n[A-Z]|\n\n|$)/gim,
-    ];
+    // Code blocks (```code``` atau `code`)
+    formatted = formatted.replace(/```[\s\S]*?```/g, "");
+    formatted = formatted.replace(/`([^`]+)`/g, "$1");
 
-    thinkPatterns.forEach((pattern) => {
-      const before = cleaned;
-      cleaned = cleaned.replace(pattern, "");
-      if (this.config.debug && before !== cleaned) {
-        console.log("🎙️ [VoiceFormatter] Pattern matched:", pattern);
-      }
-    });
+    // Links [text](url)
+    formatted = formatted.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 
-    // Additional cleanup for common AI thinking patterns
-    cleaned = cleaned.replace(/^.*?think.*?$/gim, ""); // Remove lines containing 'think'
-    cleaned = cleaned.replace(/Okay,.*?Let me.*?$/gim, ""); // Remove common AI thinking phrases
-    cleaned = cleaned.replace(/I need to.*?$/gim, ""); // Remove AI internal thoughts
-    cleaned = cleaned.replace(/First,.*?Then,.*?$/gim, ""); // Remove step-by-step thinking
+    // Headers (# ## ###)
+    formatted = formatted.replace(/^#{1,6}\s+/gm, "");
 
-    return cleaned;
+    // Lists (- * +)
+    formatted = formatted.replace(/^[\s]*[-*+]\s+/gm, "");
   }
 
-  /**
-   * Remove markdown formatting
-   */
-  private removeMarkdown(text: string): string {
-    let cleaned = text;
-
-    // Remove code blocks
-    cleaned = cleaned.replace(/```[\s\S]*?```/g, "");
-    cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
-
-    // Remove headers
-    cleaned = cleaned.replace(/^#+\s+/gm, "");
-
-    // Remove bold and italic
-    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, "$1");
-    cleaned = cleaned.replace(/\*([^*]+)\*/g, "$1");
-    cleaned = cleaned.replace(/__([^_]+)__/g, "$1");
-    cleaned = cleaned.replace(/_([^_]+)_/g, "$1");
-
-    // Remove links
-    cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-
-    // Remove lists
-    cleaned = cleaned.replace(/^[\s]*[-*+]\s+/gm, "");
-    cleaned = cleaned.replace(/^\d+\.\s+/gm, "");
-
-    // Remove blockquotes
-    cleaned = cleaned.replace(/^>\s+/gm, "");
-
-    return cleaned;
-  }
-
-  /**
-   * Remove emoticons and emojis
-   */
-  private removeEmoticons(text: string): string {
-    let cleaned = text;
-
-    // Remove Unicode emojis
-    cleaned = cleaned.replace(
+  // 4. Hapus emoji (opsional)
+  if (opts.removeEmojis) {
+    // Regex untuk emoji Unicode
+    formatted = formatted.replace(
       /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu,
       ""
     );
 
-    // Remove common emoticons
-    cleaned = cleaned.replace(/[:;=]-?[)(\[\]{}|\\\/DPpoO@$*><^-]/g, "");
-    cleaned = cleaned.replace(/[)(\[\]{}|\\\/DPpoO@$*><^-]-?[:;=]/g, "");
-
-    return cleaned;
+    // Emoji shortcodes (:smile:, :heart:, dll)
+    formatted = formatted.replace(/:[a-zA-Z0-9_+-]+:/g, "");
   }
 
-  /**
-   * Normalize numbers for better pronunciation
-   */
-  private normalizeNumbers(text: string): string {
-    let normalized = text;
+  // 5. Bersihkan HTML tags lainnya
+  formatted = formatted.replace(/<[^>]*>/g, "");
 
-    // Convert percentage symbols
-    normalized = normalized.replace(/(\d+)%/g, "$1 persen");
+  // 6. Normalize whitespace
+  if (opts.normalizeWhitespace) {
+    // Hapus multiple spaces
+    formatted = formatted.replace(/\s+/g, " ");
 
-    // Convert currency symbols
-    normalized = normalized.replace(/Rp\s?(\d+)/g, "$1 rupiah");
-    normalized = normalized.replace(/\$(\d+)/g, "$1 dollar");
+    // Hapus multiple newlines
+    formatted = formatted.replace(/\n\s*\n/g, "\n");
 
-    return normalized;
+    // Trim whitespace
+    formatted = formatted.trim();
   }
 
-  /**
-   * Normalize punctuation for better speech flow
-   */
-  private normalizePunctuation(text: string): string {
-    let normalized = text;
+  // 7. Potong jika terlalu panjang
+  if (opts.maxLength && formatted.length > opts.maxLength) {
+    // Potong di kata terakhir yang lengkap
+    const truncated = formatted.substring(0, opts.maxLength);
+    const lastSpace = truncated.lastIndexOf(" ");
+    formatted = lastSpace > 0 ? truncated.substring(0, lastSpace) : truncated;
 
-    // Replace multiple punctuation marks
-    normalized = normalized.replace(/[!]{2,}/g, "!");
-    normalized = normalized.replace(/[?]{2,}/g, "?");
-    normalized = normalized.replace(/[.]{3,}/g, "...");
-
-    // Convert common abbreviations
-    const abbreviations: Record<string, string> = {
-      dll: "dan lain lain",
-      dsb: "dan sebagainya",
-      dst: "dan seterusnya",
-      yg: "yang",
-      dgn: "dengan",
-      utk: "untuk",
-      dr: "dari",
-      krn: "karena",
-      tdk: "tidak",
-      blm: "belum",
-      sdh: "sudah",
-      hrs: "harus",
-      kalo: "kalau",
-    };
-
-    Object.entries(abbreviations).forEach(([abbr, full]) => {
-      const regex = new RegExp(`\\b${abbr}\\b`, "gi");
-      normalized = normalized.replace(regex, full);
-    });
-
-    return normalized;
-  }
-
-  /**
-   * Clean up text from unwanted characters and formatting
-   */
-  private cleanupText(text: string): string {
-    let cleaned = text;
-
-    // Remove extra whitespace and line breaks
-    cleaned = cleaned.replace(/\s+/g, " ");
-    cleaned = cleaned.replace(/\n+/g, " ");
-
-    // Remove special characters that might confuse TTS
-    cleaned = cleaned.replace(/[#@$%^&*+=\[\]{}\\|<>]/g, "");
-
-    // Clean up quotes
-    cleaned = cleaned.replace(/["'""`]/g, "");
-
-    // Remove parentheses content that might be technical
-    cleaned = cleaned.replace(/\([^)]*\)/g, "");
-
-    // Remove URLs
-    cleaned = cleaned.replace(/https?:\/\/[^\s]+/g, "");
-
-    // Remove multiple spaces
-    cleaned = cleaned.replace(/\s{2,}/g, " ");
-
-    return cleaned;
-  }
-
-  /**
-   * Limit text length for reasonable speech duration
-   */
-  private limitLength(text: string, maxLength: number): string {
-    if (text.length <= maxLength) {
-      return text;
+    // Tambahkan indikator bahwa text dipotong
+    if (formatted.length < text.length) {
+      formatted += "...";
     }
-
-    // Try to cut at sentence boundary
-    const sentences = text.split(/[.!?]+/);
-    let result = "";
-
-    for (const sentence of sentences) {
-      const trimmedSentence = sentence.trim();
-      if (!trimmedSentence) continue;
-
-      if ((result + trimmedSentence + ".").length > maxLength) {
-        break;
-      }
-      result += (result ? " " : "") + trimmedSentence + ".";
-    }
-
-    // If no complete sentence fits, cut at word boundary
-    if (result.length === 0) {
-      const words = text.split(" ");
-      while (words.length > 0 && result.length < maxLength) {
-        const nextWord = words.shift();
-        if ((result + " " + nextWord).length > maxLength) {
-          break;
-        }
-        result += (result ? " " : "") + nextWord;
-      }
-      result += "."; // Add period for better speech
-    }
-
-    return result || text.substring(0, maxLength);
   }
 
-  /**
-   * Check if text is suitable for voice synthesis
-   */
-  isSuitableForVoice(text: string): boolean {
-    const formatted = this.formatForVoice(text);
-    if (!formatted.trim()) {
-      return false;
-    }
-
-    // Check if text contains mostly readable characters
-    const readableChars = formatted.replace(/[^\w\s.,!?]/g, "").length;
-    const totalChars = formatted.length;
-
-    return totalChars > 0 && readableChars / totalChars > 0.5;
-  }
-}
-
-// Export singleton instance with debug enabled for now
-export const voiceFormatter = new VoiceFormatter({
-  ...DEFAULT_VOICE_CONFIG,
-  debug: true, // Enable debugging
-});
-
-// Export utility functions
-export const formatForVoice = (
-  text: string,
-  config?: Partial<VoiceFormatterConfig>
-): string => {
-  if (config) {
-    const formatter = new VoiceFormatter({
-      ...DEFAULT_VOICE_CONFIG,
-      ...config,
-    });
-    return formatter.formatForVoice(text);
-  }
-  return voiceFormatter.formatForVoice(text);
+  return formatted;
 };
 
-export const isVoiceSuitable = (text: string): boolean => {
-  return voiceFormatter.isSuitableForVoice(text);
+/**
+ * Formatter khusus untuk conversation context
+ * Lebih aggressive dalam membersihkan text
+ */
+export const formatForConversation = (text: string): string => {
+  return formatForTTS(text, {
+    removeThinkTags: true,
+    removeMarkdown: false, // Keep some markdown for context
+    removeEmojis: false, // Keep emojis for context
+    removeAIPrefix: true,
+    normalizeWhitespace: true,
+    maxLength: undefined, // No length limit for conversation
+  });
 };
 
-// Test function to debug specific responses
-export const debugVoiceFormatting = (text: string): void => {
-  console.log("🔍 [DEBUG] Testing voice formatting:");
-  console.log("Input:", text);
-  const result = formatForVoice(text, { debug: true });
-  console.log("Output:", result);
-  console.log("Suitable for voice:", isVoiceSuitable(text));
+/**
+ * Formatter khusus untuk display UI
+ * Mempertahankan formatting visual
+ */
+export const formatForDisplay = (text: string): string => {
+  return formatForTTS(text, {
+    removeThinkTags: true,
+    removeMarkdown: false, // Keep markdown for display
+    removeEmojis: false, // Keep emojis for display
+    removeAIPrefix: false, // Keep AI prefix for clarity
+    normalizeWhitespace: true,
+    maxLength: undefined,
+  });
+};
+
+/**
+ * Deteksi apakah text mengandung tag <think>
+ */
+export const hasThinkTags = (text: string): boolean => {
+  return /<think>[\s\S]*?<\/think>/gi.test(text);
+};
+
+/**
+ * Ekstrak hanya content dari tag <think>
+ * Berguna untuk debugging atau logging
+ */
+export const extractThinkContent = (text: string): string[] => {
+  const matches = text.match(/<think>([\s\S]*?)<\/think>/gi);
+  if (!matches) return [];
+
+  return matches.map((match) => match.replace(/<\/?think>/gi, "").trim());
+};
+
+/**
+ * Validasi text untuk TTS
+ * Memastikan text aman untuk diucapkan
+ */
+export const validateForTTS = (
+  text: string
+): {
+  isValid: boolean;
+  issues: string[];
+  cleaned: string;
+} => {
+  const issues: string[] = [];
+
+  // Cek tag <think>
+  if (hasThinkTags(text)) {
+    issues.push("Contains <think> tags");
+  }
+
+  // Cek panjang text
+  if (text.length > 1000) {
+    issues.push("Text too long for TTS");
+  }
+
+  // Cek karakter khusus yang bermasalah
+  if (/[<>{}[\]]/g.test(text)) {
+    issues.push("Contains problematic characters");
+  }
+
+  const cleaned = formatForTTS(text);
+
+  return {
+    isValid: issues.length === 0,
+    issues,
+    cleaned,
+  };
+};
+
+// Helper untuk testing
+export const testFormatter = () => {
+  const testText = `Asistenqu:<think> Okay, the user asked about my current status. I should respond in a friendly and conversational way. </think> Hei! **Terima kasih** kabar! Saya juga sedang berada di sini untuk membantu Anda. 😊`;
+
+  console.log("Original:", testText);
+  console.log("Formatted:", formatForTTS(testText));
+  console.log("Has think tags:", hasThinkTags(testText));
+  console.log("Think content:", extractThinkContent(testText));
+  console.log("Validation:", validateForTTS(testText));
 };
